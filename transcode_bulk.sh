@@ -31,9 +31,21 @@
 
 maxjobs=$(grep "processor" /proc/cpuinfo | wc -l)
 #maxjobs=1
+reserved_load=5 # target CPU idle time percentage
 jobname="ffmpeg"
 target_format="mp3"
 destdir="$target_format"
+tmpdir=/tmp/transcode_bulk.sh
+CPU_load_file_full_path=$tmpdir/cpuload.txt
+
+trap 'sigintexit' SIGINT # handle Ctrl+C
+
+sigintexit(){
+	# kill load monitor and all running jobs
+	kill $(jobs -p) 2> /dev/null
+	trap SIGINT
+	exit 1
+}
 
 if [ $# == 0 ]
 then
@@ -59,20 +71,43 @@ then
 	fi
 fi
 
+if [ ! -d "$tmpdir" ]
+then
+	mkdir "$tmpdir"
+	if [ $? != 0 ]
+	then
+		echo "ERROR: Temporary directory doesn't exist and failed creating it!"
+		exit 1
+	fi
+fi
+
+# start monitoring cpu utilization/idle time
+vmstat 1  > $CPU_load_file_full_path &
+
 progress=0
 for song_name in "$@"
 do
 	nice -n 19 ffmpeg -n -i "$song_name" -f $target_format "$destdir/$(echo "$song_name" | sed -r 's/\.(.{3,4})$/.'${target_format}'/')" 2> /dev/null&
 	((progress++))
-	
+
 	clear
 	echo "Progress: (${progress}/$#)"
 	
-	while [[ $(ps -Af | grep "$jobname" | wc -l) -gt $maxjobs ]] # > instead of >= because grep is also present on process list
+	while [[ $(ps -Af | grep "$jobname" | wc -l) -gt $maxjobs || $(tail -1 $CPU_load_file_full_path | awk '{print $15}') -lt $reserved_load ]] # > instead of >= because grep is also present on process list
 	do
 		sleep 1
 	done
 done
+
+#wait for all ffmpeg jobs to finish
+while [[ rem_jobs=$(jobs | grep "Running" | wc -l) -gt 1 ]] #1 job left running is cpu load monitor (vmstat)
+do
+	echo "Waiting for remaining jobs($rem_jobs) to finish..."
+	sleep 1
+done
+
+kill $(jobs -p) 2> /dev/null   # kill load monitor
+trap SIGINT                    # release ^C trap
 
 echo "DONE"
 exit 0
