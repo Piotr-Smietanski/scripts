@@ -15,7 +15,7 @@ return
 move_mouse_and_click(X, Y, Speed=1, Delay=33)
 {
 	MouseMove, X, Y, Speed
-	Random, rndd, 0, 20 ; additional random delay between clicks - helps in case of low frame rate
+	Random, rndd, 0, 20
 	Delay:=Delay+rndd
 	Sleep, %Delay%
 	Click
